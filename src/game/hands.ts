@@ -158,9 +158,12 @@ export class HandTracker {
     if (session && frame && ref) {
       const seen = [false, false];
       for (const src of session.inputSources as any[]) {
-        if (!src.hand) continue;
+        if (src.handedness !== 'left' && src.handedness !== 'right') continue;
         const idx = src.handedness === 'left' ? 0 : 1;
-        if (this.readHand(this.hands[idx], src, frame, ref, src.handedness, dt)) {
+        const ok = src.hand
+          ? this.readHand(this.hands[idx], src, frame, ref, src.handedness, dt)
+          : this.readController(this.hands[idx], src, frame, ref, dt);
+        if (ok) {
           seen[idx] = true;
           any = true;
         }
@@ -212,6 +215,33 @@ export class HandTracker {
     const p = pose.transform.position;
     out.set(p.x, p.y, p.z);
     this.player.localToWorld(out);
+    return true;
+  }
+
+  /**
+   * Controller fallback (optional per the rules): trigger = pinch, grip held = open palm facing down.
+   * Lets people without hand tracking, and the XR emulator, play the whole game.
+   */
+  private readController(h: Hand, src: any, frame: any, ref: any, dt: number): boolean {
+    const space = src.gripSpace ?? src.targetRaySpace;
+    const pose = space ? frame.getPose(space, ref) : null;
+    if (!pose) return false;
+    const p = pose.transform.position;
+    h.kind = 'xr';
+    h.present = true;
+    h.tip.set(p.x, p.y, p.z);
+    this.player.localToWorld(h.tip);
+    h.thumb.copy(h.tip);
+    h.palm.copy(h.tip);
+    h.wrist.copy(h.tip);
+    h.pinchPoint.copy(h.tip);
+    const b = src.gamepad?.buttons ?? [];
+    const trigger = !!b[0]?.pressed;
+    const grip = !!b[1]?.pressed;
+    h.palmNormal.set(0, grip ? -1 : 0.3, 0).normalize();
+    h.spread = grip ? 0.01 : 0.2;
+    h.setPinch(trigger, dt);
+    h.motion(dt);
     return true;
   }
 

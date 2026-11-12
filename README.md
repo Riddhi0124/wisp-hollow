@@ -25,6 +25,7 @@ npm run dev            # HTTPS dev server + emulator (installs a Playwright brow
 WISP_HTTP=1 npx iwsdk dev restart --no-open --foreground   # plain HTTP, no browser download
 npm run build          # outputs dist/
 ```
+Controllers also work (trigger = pinch, hold grip = open palm).
 Desktop testing: mouse = hand (hold to pinch, `S` held = open palm, wheel = hand height).
 
 ## Deploy (judges need a public HTTPS link)

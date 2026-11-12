@@ -472,7 +472,7 @@ export class Game {
     }
     if (flat) this.calibProg = Math.min(1, this.calibProg + dt / 0.9);
     else this.calibProg = Math.max(0, this.calibProg - dt * 2);
-    this.hint = flat ? 'Hold still…' : this.est.havePlane ? 'Table found — rest your palm on it' : 'Rest your palm flat on your table';
+    this.hint = flat ? 'Hold still…' : this.est.havePlane ? 'Table found — rest your palm on it' : 'Rest your palm flat on your table (or hold grip on it)';
     this.ghost.position.set(this.est.pos.x, flat ? flat.palm.y - 0.012 : this.est.pos.y, this.est.pos.z);
     this.ghost.rotation.y = this.est.yaw;
     this.ghost.scale.setScalar(this.est.scale);
@@ -526,7 +526,10 @@ export class Game {
       this.est.pos.copy(best.c);
       this.est.scale = Math.max(0.6, Math.min(1.1, Math.min(best.long / W, best.short / D)));
       this.est.yaw = Math.atan2(this.hands.gazeOrigin.x - best.c.x, this.hands.gazeOrigin.z - best.c.z);
-    } else this.est.havePlane = false;
+    } else {
+      this.est.havePlane = false;
+      this.est.scale = 1;
+    }
   }
 
   private toLocal(world: Vector3, out: Vector3): Vector3 {

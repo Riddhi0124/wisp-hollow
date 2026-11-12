@@ -7,15 +7,15 @@
 ## Description (~330 words)
 **Inspiration.** The best seated moments in VR are small and tactile. I wanted a game that only makes sense on *your* table, where your real room is part of the puzzle, and where your hands do things hands naturally do: lay a plank, cup something fragile, poke a curious creature.
 
-**What it is.** Wisp Hollow is a mixed-reality tabletop game. Rest your palm on your table and a glowing valley blooms on it. Tiny wisps hatch at one end and want to reach the hearth at the other. They are autonomous agents, so you never steer them. You shape their world: pinch a log and lay it over the river, then hold an open palm over them when rain rolls in. The wisps run to your hand for cover. Pinch the air above a real object (a mug, a phone) and a mountain rises where it sits, so your actual clutter reshapes the map.
+**What it is.** Wisp Hollow is a mixed-reality tabletop game. Rest your palm on your table and a glowing valley blooms on it. Tiny wisps hatch at one end and want to reach the hearth at the other. They are autonomous agents, so you never steer them. You shape their world: pinch a log and lay it over the river, then hold an open palm over them when rain rolls in. The wisps run to your hand for cover. Pinch the air above a real object (a mug, a phone) and a mountain rises at that spot, so you can mirror your actual clutter in the map.
 
 **Why it fits the criteria.**
 - *Hands-first, seated, short:* the whole game (menus included) works with hands only, inside a 2-foot reach, and a Dusk takes about 3 minutes.
-- *Purposeful passthrough:* the valley is anchored to your detected table (WebXR plane detection) and calibrated by your palm, so it holds up in rooms I never tested. Real objects become terrain.
+- *Purposeful passthrough:* the valley is anchored to your detected table (WebXR plane detection) and calibrated by your palm, with no room scan needed, so it works in any room. Real objects can be mirrored as terrain.
 - *Agentic:* each wisp scores goals (home, healing, shelter, company, curiosity), remembers where it got wet, and learns where bridges are. It runs on-device, with no third-party AI service.
 - *Reason to come back:* rescued wisps move into a persistent valley with lanterns, and saplings grow in real time while you're away. A Daily Dusk adds a streak.
-- *First five minutes:* no text wall. A glowing guide ring shows the log, the river, then the first storm. The first payoff arrives in under two minutes.
-- *Accessibility:* gaze-dwell mode, voice commands, high-contrast palette, one-handed play.
+- *First five minutes:* no text wall. A glowing guide ring shows the log, the river, then the first storm. The first payoff (wisps reaching the fire) comes within the first minute or two.
+- *Accessibility:* gaze-dwell mode, voice commands, high-contrast palette, one-handed play, and an optional controller fallback.
 - *FoV-aware:* the HUD sits low and centred in a narrow cone.
 
 **How I built it.** Immersive Web SDK on Three.js. Raw WebXR hand joints drive pinch, poke and palm-down shelter detection. Everything is procedural, with no asset downloads, so it cold-starts fast. Audio is synthesized with WebAudio.
