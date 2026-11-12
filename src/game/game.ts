@@ -1272,7 +1272,7 @@ export class Game {
     const v = this.valley;
     const l = this.toLocal(h.pinchPoint, new Vector3());
     let best: Wisp | Log | null = null;
-    let bd = 0.055;
+    let bd = h.isController ? 0.085 : 0.055;
     for (const w of this.wisps) {
       if (w.state !== 'live' && w.state !== 'faint') continue;
       if (w.state === 'faint') continue;
@@ -1283,7 +1283,7 @@ export class Game {
       for (const lg of v.logs) {
         if (lg.heldBy >= 0) continue;
         const d = v.logDistance(lg, l.x, l.z) + Math.abs(l.y - lg.y) * 0.3;
-        if (d < Math.min(bd, 0.045)) { bd = d; best = lg; }
+        if (d < Math.min(bd, h.isController ? 0.07 : 0.045)) { bd = d; best = lg; }
       }
     }
     if (best) {

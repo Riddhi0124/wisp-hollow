@@ -32,6 +32,8 @@ export class Hand {
   spread = 1;
   flatTime = 0;
   grabbed: unknown = null;
+  /** True when driven by a controller (more forgiving grab radius). */
+  isController = false;
   /** Pointing ray (controller / hand target ray) for aiming at menu buttons. */
   hasRay = false;
   rayOrigin = new Vector3();
@@ -259,8 +261,12 @@ export class HandTracker {
     const space = src.gripSpace ?? src.targetRaySpace;
     const pose = space ? frame.getPose(space, ref) : null;
     if (!pose) return false;
-    const p = pose.transform.position;
+    // aim with the controller's tip (target-ray origin), not its handle
+    const rs = src.targetRaySpace;
+    const rp = rs ? frame.getPose(rs, ref) : null;
+    const p = (rp ?? pose).transform.position;
     h.kind = 'xr';
+    h.isController = true;
     h.present = true;
     h.tip.set(p.x, p.y, p.z);
     this.player.localToWorld(h.tip);
@@ -285,6 +291,7 @@ export class HandTracker {
     if (!this.jp(frame, ref, hand, J.thumb, thumb)) return false;
     if (!this.jp(frame, ref, hand, J.index, index)) return false;
     h.kind = 'xr';
+    h.isController = false;
     h.present = true;
     h.wrist.copy(wrist);
     h.thumb.copy(thumb);
