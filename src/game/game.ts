@@ -438,6 +438,11 @@ export class Game {
     this.phase = 'result';
     this.raining = false;
     this.rebuildMain();
+    if (this.demo && this.curDef && this.curDef.id < 4 && this.resultStars >= 1) {
+      // demo: roll straight on to the next level so one recording shows several
+      const nextDef = LEVELS[this.curDef.id];
+      setTimeout(() => this.phase === 'result' && this.startDusk(false, nextDef), 5500);
+    }
     this.snd.fanfare();
     this.snd.setRain(0);
     this.snd.setTension(0);
@@ -1176,6 +1181,22 @@ export class Game {
         break;
       case 'idle':
         goto(0.1, 0.24, 0.3);
+        if (this.gloom.length) {
+          // night: swat the nearest gloomling with a quick flick
+          let bx = 0;
+          let bz = 0;
+          let bd = 1e9;
+          for (const gl of this.gloom) {
+            const d = Math.hypot(gl.x - this.demoPos.x, gl.z - this.demoPos.z);
+            if (d < bd) {
+              bd = d;
+              bx = gl.x;
+              bz = gl.z;
+            }
+          }
+          goto(bx, 0.03, bz);
+          speed = 0.7;
+        }
         if (this.warning || this.raining) next('shelter');
         break;
       case 'shelter': {
