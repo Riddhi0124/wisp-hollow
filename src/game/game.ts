@@ -78,6 +78,8 @@ export class Game {
   private dwellBtn: Btn | null = null;
   private dwell = 0;
   private armed = new Map<Hand, boolean>();
+  private rayHit = new Set<Hand>();
+  private autoStart = false;
   private cursors: Sprite[] = [];
   private reticle: Sprite;
   private guide: Sprite;
@@ -182,6 +184,11 @@ export class Game {
     this.main.group.rotation.x = -0.45;
     this.hudPos.set(0, 1.2, -0.5);
 
+    try {
+      this.autoStart = new URLSearchParams(location.search).get('auto') === '1';
+    } catch {
+      /* no URL access */
+    }
     this.applySettings();
     this.setupInput();
     renderer.xr.addEventListener('sessionstart', () => {
@@ -257,6 +264,11 @@ export class Game {
     this.ghost.visible = false;
     this.placedK = 0;
     this.enterHome();
+    if (this.autoStart) {
+      // ?auto=1 skips the menu (handy for demos / recording)
+      this.autoStart = false;
+      setTimeout(() => this.phase === 'home' && this.startDusk(false), 2500);
+    }
     this.snd.chime(4, 0.2);
     setTimeout(() => this.snd.chime(7, 0.2), 140);
     setTimeout(() => this.snd.chime(9, 0.2), 280);
@@ -584,8 +596,8 @@ export class Game {
     this.scanMeshes();
 
     // interaction
-    this.updateGrabs(dt);
     this.updatePanels(dt);
+    this.updateGrabs(dt);
     if (this.save.settings.gaze) this.updateGaze(dt);
     else this.reticle.visible = false;
 
@@ -849,12 +861,12 @@ export class Game {
     const v = this.valley;
     const l = this.tmp;
     for (const h of this.hands.active) {
-      if (h.justPinched && !this.overPanel(h)) this.tryGrab(h);
+      if (h.justPinched && !this.overPanel(h) && !this.rayHit.has(h)) this.tryGrab(h);
       if (h.grabbed) {
         if (!h.present || !h.pinch) {
           this.release(h);
         } else this.dragGrabbed(h, dt);
-      } else if (h.justReleased && h.lastPinchTime < 0.45 && h.lastPinchTravel < 0.03 && !this.overPanel(h)) {
+      } else if (h.justReleased && h.lastPinchTime < 0.45 && h.lastPinchTravel < 0.03 && !this.overPanel(h) && !this.rayHit.has(h)) {
         // quick pinch on empty air = raise a mountain exactly where your real object sits
         this.toLocal(h.pinchPoint, l);
         const s = v.level;
@@ -987,8 +999,25 @@ export class Game {
   // ---------- panels, gaze, voice ----------------------------------------
 
   private updatePanels(dt: number): void {
+    this.rayHit.clear();
     if (!this.main.group.visible) return;
     this.hover = null;
+    // point-and-pinch (hand) / point-and-trigger (controller) at the menu
+    for (const h of this.hands.active) {
+      if (!h.hasRay) continue;
+      this.ray.set(h.rayOrigin, h.rayDir);
+      const hit = this.ray.intersectObject(this.main.mesh, false)[0];
+      if (!hit) continue;
+      this.main.mesh.worldToLocal(this.tmp2.copy(hit.point));
+      const b = this.main.btnAt(this.tmp2);
+      if (!b) continue;
+      this.hover = b;
+      this.rayHit.add(h);
+      if (h.justPinched) {
+        this.press(b);
+        return;
+      }
+    }
     const dwellOwner = this.dwellBtn;
     void dwellOwner;
     for (const h of this.hands.active) {

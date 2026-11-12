@@ -1,5 +1,6 @@
 import {
   Object3D,
+  Quaternion,
   PerspectiveCamera,
   Plane,
   Raycaster,
@@ -31,12 +32,17 @@ export class Hand {
   spread = 1;
   flatTime = 0;
   grabbed: unknown = null;
+  /** Pointing ray (controller / hand target ray) for aiming at menu buttons. */
+  hasRay = false;
+  rayOrigin = new Vector3();
+  rayDir = new Vector3(0, 0, -1);
   private prevPalm = new Vector3();
   private prevTip = new Vector3();
   private pinchStart = new Vector3();
   constructor(readonly id: number) {}
 
   beginFrame(): void {
+    this.hasRay = false;
     this.justPinched = false;
     this.justReleased = false;
   }
@@ -164,6 +170,7 @@ export class HandTracker {
           ? this.readHand(this.hands[idx], src, frame, ref, src.handedness, dt)
           : this.readController(this.hands[idx], src, frame, ref, dt);
         if (ok) {
+          this.readRay(this.hands[idx], src, frame, ref);
           seen[idx] = true;
           any = true;
         }
@@ -205,6 +212,22 @@ export class HandTracker {
       m.present = false;
       m.setPinch(false, dt);
     }
+  }
+
+  private qTmp = new Quaternion();
+  private qPlayer = new Quaternion();
+  private readRay(h: Hand, src: any, frame: any, ref: any): void {
+    const sp = src.targetRaySpace;
+    const pose = sp ? frame.getPose(sp, ref) : null;
+    if (!pose) return;
+    const p = pose.transform.position;
+    const o = pose.transform.orientation;
+    h.rayOrigin.set(p.x, p.y, p.z);
+    this.player.localToWorld(h.rayOrigin);
+    this.qTmp.set(o.x, o.y, o.z, o.w);
+    this.player.getWorldQuaternion(this.qPlayer);
+    h.rayDir.set(0, 0, -1).applyQuaternion(this.qTmp).applyQuaternion(this.qPlayer).normalize();
+    h.hasRay = true;
   }
 
   private jp(frame: any, ref: any, hand: any, name: string, out: Vector3): boolean {
