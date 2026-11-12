@@ -218,7 +218,7 @@ export class Game {
       this.autoParam = q.get('auto') === '1' || this.demo || this.paramLevel > 0;
       this.autoStart = this.autoParam;
       this.hands.external = this.demo;
-      this.hands.mouseInXR = q.get('mouse') === '1';
+      this.hands.mouseInXR = q.get('mouse') !== '0'; // on by default; ?mouse=0 turns it off
       if (q.get('contrast') === '1') this.save.settings.contrast = true; // link option for the accessibility shot (not saved)
     } catch {
       /* no URL access */

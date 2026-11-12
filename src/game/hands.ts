@@ -99,7 +99,7 @@ export class HandTracker {
   /** When true, something else (the scripted demo) drives mouseHand. */
   external = false;
   /** ?mouse=1: let the mouse act as a hand even inside an XR session (emulator play / recording). */
-  mouseInXR = false;
+  mouseInXR = true;
   xrActive = false;
   hasRealHands = false;
   tableY = 0.75;
@@ -207,7 +207,8 @@ export class HandTracker {
       const h = this.mouse.umbrella ? 0.14 : this.mouse.h;
       this.plane.constant = -(this.tableY + h);
       const hit = this.ray.ray.intersectPlane(this.plane, this.tmp[0]);
-      if (hit) {
+      // inside XR the mouse only counts once it has actually moved (a headset sends no mouse events)
+      if (hit && (!session || this.mouse.moved)) {
         m.present = true;
         m.tip.copy(hit);
         m.thumb.copy(hit);
@@ -219,6 +220,9 @@ export class HandTracker {
         m.setPinch(this.mouse.down && !this.mouse.umbrella, dt);
         m.motion(dt);
         m.flatTime = this.mouse.umbrella ? m.flatTime + dt : 0;
+      } else {
+        m.present = false;
+        m.setPinch(false, dt);
       }
     } else {
       m.present = false;
