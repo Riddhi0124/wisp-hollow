@@ -30,6 +30,13 @@ export const LOG_LEN = 0.16;
 
 export interface RiverDef { x: number; w: number }
 export interface Level {
+  id: number;
+  name: string;
+  blurb: string;
+  floods: number[];
+  winds: number[];
+  night: boolean;
+  gloom: number;
   seed: number;
   home: boolean;
   tutorial: boolean;
@@ -82,6 +89,13 @@ export function makeLevel(seed: number, difficulty: number, tutorial: boolean): 
     if (free(x, z, 0.04) && rocks.every((k) => Math.hypot(k.x - x, k.z - z) > k.r + 0.04)) caps.push({ x, z });
   }
   return {
+    id: 0,
+    name: tutorial ? 'First Light' : 'Dusk',
+    blurb: '',
+    floods: [],
+    winds: [],
+    night: false,
+    gloom: 0,
     seed,
     home: false,
     tutorial,
@@ -97,8 +111,78 @@ export function makeLevel(seed: number, difficulty: number, tutorial: boolean): 
   };
 }
 
+
+export interface LevelDef {
+  id: number;
+  name: string;
+  blurb: string;
+  wisps: number;
+  rivers: number;
+  rocks: number;
+  caps: number;
+  logs: number;
+  storms: number[];
+  winds: number[];
+  floods: number[];
+  night: boolean;
+  gloom: number;
+  duration: number;
+}
+
+/** The seven-level journey. Each level teaches one new idea, the last mixes them all. */
+export const LEVELS: LevelDef[] = [
+  { id: 1, name: 'First Light', blurb: 'Lay a bridge and guide them home', wisps: 2, rivers: 1, rocks: 0, caps: 2, logs: 1, storms: [26], winds: [], floods: [], night: false, gloom: 0, duration: 100 },
+  { id: 2, name: 'Rainfall', blurb: 'Storms roll in: shelter under your palm', wisps: 3, rivers: 1, rocks: 3, caps: 3, logs: 2, storms: [22, 66], winds: [], floods: [], night: false, gloom: 0, duration: 120 },
+  { id: 3, name: 'Two Rivers', blurb: 'Two rivers, one plank each', wisps: 4, rivers: 2, rocks: 5, caps: 4, logs: 3, storms: [34, 90], winds: [], floods: [], night: false, gloom: 0, duration: 150 },
+  { id: 4, name: 'Night Watch', blurb: 'Gloomlings hunt in the dark: poke them away', wisps: 4, rivers: 1, rocks: 4, caps: 4, logs: 2, storms: [], winds: [], floods: [], night: true, gloom: 4, duration: 150 },
+  { id: 5, name: 'Gale', blurb: 'Wind shoves wisps: hide behind mountains', wisps: 5, rivers: 1, rocks: 6, caps: 4, logs: 2, storms: [70], winds: [26, 58, 100], floods: [], night: false, gloom: 0, duration: 150 },
+  { id: 6, name: 'Flood', blurb: 'The river rises and sweeps bridges away', wisps: 5, rivers: 2, rocks: 5, caps: 4, logs: 3, storms: [48], winds: [], floods: [52, 104], night: false, gloom: 0, duration: 170 },
+  { id: 7, name: 'Hollow Heart', blurb: 'Night, wind, flood and storm', wisps: 6, rivers: 2, rocks: 7, caps: 5, logs: 3, storms: [36, 96], winds: [60], floods: [78], night: true, gloom: 4, duration: 180 },
+];
+
+export function makeLevelDef(def: LevelDef, seed: number): Level {
+  const base = makeLevel(seed, def.rivers >= 2 ? 2 : 0, def.id === 1);
+  // regenerate rocks/caps for this definition (makeLevel's own counts are tuned for daily play)
+  const r = mulberry32(seed ^ (def.id * 7919));
+  const free = (x: number, z: number, pad: number) =>
+    base.rivers.every((v) => Math.abs(x - v.x) > v.w / 2 + pad) &&
+    Math.hypot(x - base.nest.x, z - base.nest.z) > 0.09 &&
+    Math.hypot(x - base.hearth.x, z - base.hearth.z) > 0.09;
+  const rocks: Level['rocks'] = [];
+  const caps: Level['caps'] = [];
+  for (let t = 0; rocks.length < def.rocks && t < 300; t++) {
+    const x = (r() - 0.5) * (W - 0.1);
+    const z = (r() - 0.5) * (D - 0.1);
+    const rad = 0.022 + r() * 0.016;
+    if (free(x, z, rad + 0.02) && rocks.every((k) => Math.hypot(k.x - x, k.z - z) > k.r + rad + 0.04)) rocks.push({ x, z, r: rad });
+  }
+  for (let t = 0; caps.length < def.caps && t < 300; t++) {
+    const x = (r() - 0.5) * (W - 0.12);
+    const z = (r() - 0.5) * (D - 0.12);
+    if (free(x, z, 0.04) && rocks.every((k) => Math.hypot(k.x - x, k.z - z) > k.r + 0.04)) caps.push({ x, z });
+  }
+  return {
+    ...base,
+    id: def.id,
+    name: def.name,
+    blurb: def.blurb,
+    tutorial: def.id === 1,
+    rocks,
+    caps,
+    wisps: def.wisps,
+    logs: def.logs,
+    storms: def.storms,
+    winds: def.winds,
+    floods: def.floods,
+    night: def.night,
+    gloom: def.gloom,
+    duration: def.duration,
+  };
+}
+
 export function makeHomeLevel(): Level {
   return {
+    id: 0, name: 'Home', blurb: '', floods: [], winds: [], night: false, gloom: 0,
     seed: 1, home: true, tutorial: false, rivers: [], nest: { x: -2, z: 0 }, hearth: { x: 0, z: 0 },
     rocks: [], caps: [{ x: -0.2, z: 0.1 }, { x: 0.22, z: -0.1 }, { x: -0.05, z: -0.15 }],
     wisps: 0, logs: 0, storms: [], duration: 0,
@@ -201,6 +285,14 @@ export class Valley {
     this.m.logEdge.color.setHex(p.logEdge);
     this.m.tree.color.setHex(p.tree);
     this.m.dots.color.setHex(p.dots);
+  }
+
+  /** Night levels: deeper ground so wisp glow and glowcaps read as the only light. */
+  setNight(on: boolean): void {
+    if (on) {
+      this.m.ground.color.setHex(this.contrast ? 0x000000 : 0x03050f);
+      this.m.ground.opacity = 0.93;
+    } else this.applyPalette(this.contrast);
   }
 
   private clear(): void {

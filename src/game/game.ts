@@ -17,21 +17,23 @@ import {
   Raycaster,
   SphereGeometry,
   Sprite,
+  SpriteMaterial,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
 import { Sound } from './audio.js';
-import { makeGlow } from './fx.js';
+import { Fireflies, gloomTexture, makeGlow, Particles } from './fx.js';
 import { HandTracker, Hand } from './hands.js';
 import {
   dayKey, hashSeed, loadSave, NAMES, persist, SaveData, yesterdayKey,
 } from './save.js';
 import { Btn, Panel, text } from './ui.js';
-import { D, Level, Log, makeHomeLevel, makeLevel, Valley, W } from './valley.js';
+import { D, Level, LevelDef, LEVELS, Log, makeHomeLevel, makeLevel, makeLevelDef, Valley, W } from './valley.js';
 import { Perception, Wisp } from './wisp.js';
 
 type Phase = 'calibrate' | 'home' | 'dusk' | 'result';
+interface Gloom { sprite: Sprite; x: number; z: number; fleeUntil: number; hitCool: number; phase: number }
 interface Zone { x: number; z: number; r: number; y: number; until: number; kind: 'palm' | 'dome' | 'temp' }
 
 const STORM_WARN = 3.5;
@@ -82,6 +84,21 @@ export class Game {
   private autoStart = false;
   private autoParam = false;
   private demo = false;
+  private paramLevel = 0;
+  private selLevel = 1;
+  private curDef: LevelDef | null = null;
+  particles = new Particles();
+  fireflies = new Fireflies();
+  private trailT = 0;
+  private gloom: Gloom[] = [];
+  private firedWind = new Set<number>();
+  private firedFlood = new Set<number>();
+  private windFrom = 0;
+  private windUntil = 0;
+  private windDir = 1;
+  private floodMsgUntil = 0;
+  private demoRiver = 0;
+  private curDefKeep: LevelDef | null = null;
   private demoStage = 'wait';
   private demoT = 0;
   private demoPos = new Vector3(0.1, 0.2, 0.3);
@@ -129,6 +146,8 @@ export class Game {
     scene.add(this.root);
     this.root.add(this.valley.group);
     this.valley.group.visible = false;
+    this.valley.group.add(this.particles.points, this.fireflies.points);
+    this.selLevel = Math.max(1, Math.min(7, this.save.unlocked));
 
     // ghost outline shown while you place your table
     const g = new BufferGeometry();
@@ -195,9 +214,11 @@ export class Game {
     try {
       const q = new URLSearchParams(location.search);
       this.demo = q.get('demo') === '1';
-      this.autoParam = q.get('auto') === '1' || this.demo;
+      this.paramLevel = Math.max(0, Math.min(7, parseInt(q.get('level') ?? '0', 10) || 0));
+      this.autoParam = q.get('auto') === '1' || this.demo || this.paramLevel > 0;
       this.autoStart = this.autoParam;
       this.hands.external = this.demo;
+      this.hands.mouseInXR = q.get('mouse') === '1';
       if (q.get('contrast') === '1') this.save.settings.contrast = true; // link option for the accessibility shot (not saved)
     } catch {
       /* no URL access */
@@ -223,9 +244,9 @@ export class Game {
     const first = () => this.snd.ensure();
     el.addEventListener('pointerdown', first);
     window.addEventListener('keydown', first);
-    el.addEventListener('pointerdown', (e) => {
-      if (this.renderer.xr.isPresenting) return;
-      const r = el.getBoundingClientRect();
+    window.addEventListener('pointerdown', (e) => {
+      if (this.renderer.xr.isPresenting && !this.hands.mouseInXR) return;
+      const r = this.renderer.xr.isPresenting ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } : el.getBoundingClientRect();
       const ndc = new Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       this.ray.setFromCamera(ndc, this.camera);
       if (!this.main.group.visible) return;
@@ -282,7 +303,11 @@ export class Game {
     if (this.autoStart) {
       // ?auto=1 skips the menu (handy for demos / recording)
       this.autoStart = false;
-      setTimeout(() => this.phase === 'home' && this.startDusk(false), 2500);
+      setTimeout(() => {
+        if (this.phase !== 'home') return;
+        const def = this.paramLevel ? LEVELS[this.paramLevel - 1] : this.demo ? LEVELS[2] : LEVELS[this.selLevel - 1];
+        this.startDusk(false, def);
+      }, 2500);
     }
     this.snd.chime(4, 0.2);
     setTimeout(() => this.snd.chime(7, 0.2), 140);
@@ -308,6 +333,8 @@ export class Game {
 
   private clearWisps(): void {
     this.sensed.clear();
+    this.gloom.forEach((g) => this.valley.group.remove(g.sprite));
+    this.gloom = [];
     this.wisps.forEach((w) => this.valley.group.remove(w.group));
     this.wisps = [];
     this.hands.hands.forEach((h) => (h.grabbed = null));
@@ -320,6 +347,8 @@ export class Game {
     this.raining = false;
     this.warning = false;
     this.level = makeHomeLevel();
+    this.curDefKeep = this.curDef;
+    this.valley.setNight(false);
     const res = this.save.residents;
     this.valley.load(this.level, res.length, res.length ? this.growth() : 0);
     res.slice(0, 18).forEach((r) => {
@@ -329,15 +358,16 @@ export class Game {
     this.rebuildMain();
   }
 
-  private startDusk(daily: boolean): void {
-    const tutorial = !this.save.tutorialDone;
-    this.daily = daily && !tutorial;
+  private startDusk(daily: boolean, def?: LevelDef): void {
+    this.curDef = def ?? null;
+    this.daily = daily && !def;
     const diff = Math.min(3, Math.floor(this.save.dusks / 2));
-    const seed = daily ? hashSeed(dayKey()) : (Math.random() * 1e9) | 0;
-    this.level = makeLevel(seed, diff, tutorial);
-    if (this.demo) this.level.storms = [8]; // demo: rain hits while the wisps are crossing
+    const seed = daily ? hashSeed(dayKey()) : this.demo ? hashSeed('wisp-demo') : (Math.random() * 1e9) | 0;
+    this.level = def ? makeLevelDef(def, seed) : makeLevel(seed, diff, false);
+    if (this.demo) this.level.storms = [12]; // demo: rain hits while the wisps are crossing
     this.clearWisps();
     this.valley.load(this.level, 0, 0);
+    this.valley.setNight(this.level.night);
     const lv = this.level;
     for (let i = 0; i < lv.wisps; i++) {
       const hue = (0.5 + i * 0.137 + (seed % 100) / 400) % 1;
@@ -355,6 +385,11 @@ export class Game {
     this.bridgesEver = 0;
     this.tutStart = this.t;
     this.tempZones = [];
+    this.firedWind.clear();
+    this.firedFlood.clear();
+    this.windUntil = 0;
+    this.floodMsgUntil = 0;
+    this.demoRiver = 0;
     this.main.group.visible = false;
     this.snd.chime(2, 0.15);
   }
@@ -390,6 +425,13 @@ export class Game {
     }
     s.dusks++;
     s.stars += this.resultStars;
+    if (this.curDef) {
+      const i = this.curDef.id - 1;
+      s.levelStars[i] = Math.max(s.levelStars[i] ?? 0, this.resultStars);
+      if (this.resultStars >= 1 && this.curDef.id < 7 && s.unlocked < this.curDef.id + 1) s.unlocked = this.curDef.id + 1;
+      if (this.resultStars >= 1 && this.curDef.id < 7) this.selLevel = this.curDef.id + 1;
+      else this.selLevel = this.curDef.id;
+    }
     s.tutorialDone = true;
     s.lastSeen = Date.now();
     persist(s);
@@ -423,21 +465,36 @@ export class Game {
     const bw = (w - 90) / 2;
     if (this.phase === 'home') {
       const today = this.save.lastDay === dayKey();
+      const sel = LEVELS[this.selLevel - 1];
+      const st = this.save.levelStars[this.selLevel - 1] ?? 0;
+      const third = (w - 120) / 3;
       p.btns = [
-        { id: 'daily', x: 30, y: h * 0.3, w: bw, h: h * 0.2, label: today ? 'Daily Dusk ✓' : 'Daily Dusk', on: () => this.startDusk(true), accent: '#ffd27a' },
-        { id: 'quick', x: 60 + bw, y: h * 0.3, w: bw, h: h * 0.2, label: this.save.tutorialDone ? 'Quick Dusk' : 'Begin', on: () => this.startDusk(false) },
-        { id: 'gaze', x: 30, y: h * 0.56, w: (w - 120) / 3, h: h * 0.16, label: 'Gaze', on: () => this.toggle('gaze'), active: () => this.save.settings.gaze },
-        { id: 'voice', x: 60 + (w - 120) / 3, y: h * 0.56, w: (w - 120) / 3, h: h * 0.16, label: 'Voice', on: () => this.toggle('voice'), active: () => this.save.settings.voice },
-        { id: 'contrast', x: 90 + (2 * (w - 120)) / 3, y: h * 0.56, w: (w - 120) / 3, h: h * 0.16, label: 'Contrast', on: () => this.toggle('contrast'), active: () => this.save.settings.contrast },
-        { id: 'replace', x: 30, y: h * 0.78, w: w - 60, h: h * 0.14, label: 'Re-place valley on my table', on: () => (this.renderer.xr.isPresenting ? this.toCalibrate() : this.autoPlaceDesktop()) },
+        { id: 'prev', x: 30, y: h * 0.27, w: 70, h: h * 0.17, label: '‹', on: () => this.pickLevel(-1) },
+        { id: 'level', x: 110, y: h * 0.27, w: w - 220, h: h * 0.17, label: `${sel.id}. ${sel.name}  ${'★'.repeat(st)}${'☆'.repeat(3 - st)}`, on: () => this.startDusk(false, sel), accent: '#ffd27a' },
+        { id: 'next', x: w - 100, y: h * 0.27, w: 70, h: h * 0.17, label: '›', on: () => this.pickLevel(1) },
+        { id: 'daily', x: 30, y: h * 0.48, w: bw, h: h * 0.15, label: today ? 'Daily Dusk ✓' : 'Daily Dusk', on: () => this.startDusk(true) },
+        { id: 'replace', x: 60 + bw, y: h * 0.48, w: bw, h: h * 0.15, label: 'Re-place table', on: () => (this.renderer.xr.isPresenting ? this.toCalibrate() : this.autoPlaceDesktop()) },
+        { id: 'gaze', x: 30, y: h * 0.67, w: third, h: h * 0.15, label: 'Gaze', on: () => this.toggle('gaze'), active: () => this.save.settings.gaze },
+        { id: 'voice', x: 60 + third, y: h * 0.67, w: third, h: h * 0.15, label: 'Voice', on: () => this.toggle('voice'), active: () => this.save.settings.voice },
+        { id: 'contrast', x: 90 + 2 * third, y: h * 0.67, w: third, h: h * 0.15, label: 'Contrast', on: () => this.toggle('contrast'), active: () => this.save.settings.contrast },
       ];
     } else if (this.phase === 'result') {
+      const d = this.curDef;
+      const nextOk = !!d && d.id < 7 && this.resultStars >= 1;
       p.btns = [
-        { id: 'again', x: 30, y: h * 0.7, w: bw, h: h * 0.2, label: 'Another Dusk', on: () => this.startDusk(false), accent: '#ffd27a' },
+        nextOk
+          ? { id: 'again', x: 30, y: h * 0.7, w: bw, h: h * 0.2, label: `Next: ${LEVELS[d!.id].name}`, on: () => this.startDusk(false, LEVELS[d!.id]), accent: '#ffd27a' }
+          : { id: 'again', x: 30, y: h * 0.7, w: bw, h: h * 0.2, label: d ? 'Try again' : 'Another Dusk', on: () => (d ? this.startDusk(false, d) : this.startDusk(false)), accent: '#ffd27a' },
         { id: 'home', x: 60 + bw, y: h * 0.7, w: bw, h: h * 0.2, label: 'My Valley', on: () => this.enterHome() },
       ];
     } else p.btns = [];
     p.draw = (c, pw, ph) => this.drawMain(c, pw, ph);
+  }
+
+  private pickLevel(dir: number): void {
+    const max = Math.max(1, Math.min(7, this.save.unlocked));
+    this.selLevel = ((this.selLevel - 1 + dir + max) % max) + 1;
+    this.rebuildMain();
   }
 
   private drawMain(c: CanvasRenderingContext2D, w: number, h: number): void {
@@ -447,7 +504,8 @@ export class Game {
       const r = this.save.residents.length;
       const sub = r ? `${r} wisp${r > 1 ? 's' : ''} live here` + (this.save.streak > 0 ? `  ·  ${this.save.streak}-day streak` : '') : 'Guide the wisps home across your table';
       text(c, sub, w / 2, h * 0.22, h * 0.06, '#cfe3ff', 'center', 500, w * 0.92);
-      if (this.welcome) text(c, this.welcome, w / 2, h * 0.975, h * 0.05, '#ffd27a', 'center', 600, w * 0.92);
+      text(c, LEVELS[this.selLevel - 1].blurb, w / 2, h * 0.89, h * 0.05, '#9fd6ff', 'center', 500, w * 0.92);
+      if (this.welcome) text(c, this.welcome, w / 2, h * 0.965, h * 0.042, '#ffd27a', 'center', 600, w * 0.92);
     } else if (this.phase === 'result') {
       text(c, this.resultNew && this.resultStars > 0 ? 'They made it home!' : this.resultStars > 0 ? 'Some made it home' : 'The rain won this time', w / 2, h * 0.13, h * 0.09, hc ? '#ff0' : '#7fe8ff');
       text(c, '★'.repeat(this.resultStars) + '☆'.repeat(3 - this.resultStars), w / 2, h * 0.34, h * 0.17, '#ffd27a');
@@ -606,6 +664,7 @@ export class Game {
 
     // storms
     this.updateStorm(dt);
+    this.updateEvents(dt, time);
 
     // shelter zones from hands + temp zones
     this.updateZones(time);
@@ -661,9 +720,20 @@ export class Game {
       if (this.wisps.every((w) => w.state === 'home' || w.state === 'faint') || this.duskT >= this.level.duration) this.finishDusk();
       this.snd.setTension(this.raining ? 1 : this.warning ? 0.6 : 0);
     }
+    // ambient + trails
+    this.trailT += dt;
+    if (this.trailT > 0.045) {
+      this.trailT = 0;
+      for (const w of this.wisps) {
+        if (w.state !== 'live' && w.state !== 'held') continue;
+        this.particles.emit(w.pos.x + (Math.random() - 0.5) * 0.008, w.y + 0.012, w.pos.y + (Math.random() - 0.5) * 0.008, w.hex, (Math.random() - 0.5) * 0.01, 0.012, (Math.random() - 0.5) * 0.01, 0.75);
+      }
+    }
+    this.particles.update(dt);
+    this.fireflies.update(time, this.level.night ? 0x9fb4ff : 0xffe4a0);
     this.guideUpdate(time);
     // result/home panels stay readable: face the viewer slightly
-    this.main.render(`${this.phase}|${this.save.residents.length}|${this.resultStars}|${this.homeCount}`, this.hover, this.dwellBtn === this.hover ? this.dwell / DWELL : 0);
+    this.main.render(`${this.phase}|${this.save.residents.length}|${this.resultStars}|${this.homeCount}|${this.selLevel}|${this.save.unlocked}`, this.hover, this.dwellBtn === this.hover ? this.dwell / DWELL : 0);
   }
 
   private rules(w: Wisp, dt: number, time: number): void {
@@ -691,6 +761,8 @@ export class Game {
         w.homeT = 0;
         this.homeCount++;
         this.snd.chime(this.homeCount * 2, 0.2, w.pos.x / W);
+        this.particles.burst(hr.x, 0.05, hr.z, 0xffc060, 46, 0.2, 1.2, 1.6);
+        this.particles.burst(hr.x, 0.05, hr.z, w.hex, 26, 0.14, 1.0, 1.2);
         this.wisps.forEach((o) => o.cheer(time));
       }
     }
@@ -708,6 +780,162 @@ export class Game {
           return;
         }
       }
+    }
+  }
+
+
+  // ---------- level events: wind, flood, gloomlings ----------------------
+
+  private updateEvents(dt: number, time: number): void {
+    if (this.phase !== 'dusk' || this.paused) return;
+    const lv = this.level;
+    const t = this.duskT;
+    const v = this.valley;
+    lv.winds.forEach((s, i) => {
+      if (t >= s && !this.firedWind.has(i)) {
+        this.firedWind.add(i);
+        this.windFrom = time + 2.2; // fair warning
+        this.windUntil = time + 2.2 + 5;
+        this.windDir = i % 2 ? 1 : -1;
+        this.snd.splash(0);
+      }
+    });
+    lv.floods.forEach((s, i) => {
+      if (t >= s && !this.firedFlood.has(i)) {
+        this.firedFlood.add(i);
+        this.flood(time);
+      }
+    });
+    if (time >= this.windFrom && time < this.windUntil) {
+      for (let k = 0; k < 4; k++) {
+        const z = this.windDir > 0 ? -D / 2 : D / 2;
+        this.particles.emit((Math.random() - 0.5) * W, 0.015 + Math.random() * 0.08, z, 0xcfe8ff, 0, 0, this.windDir * (0.35 + Math.random() * 0.25), 0.9);
+      }
+      for (const w of this.wisps) {
+        if (w.state !== 'live' || w.covered) continue;
+        let lee = false;
+        for (const r of v.rocks) {
+          const dz = (w.pos.y - r.z) * this.windDir;
+          if (dz > 0 && dz < r.r + 0.075 && Math.abs(w.pos.x - r.x) < r.r + 0.02) lee = true;
+        }
+        if (lee) continue;
+        const nz = w.pos.y + this.windDir * 0.085 * dt;
+        if (!v.blocked(w.pos.x, nz)) w.pos.y = nz;
+        w.glow = Math.max(0, w.glow - 0.03 * dt);
+      }
+    }
+    if (lv.night && lv.gloom > 0 && this.gloom.length < lv.gloom && t > 6 + this.gloom.length * 8) this.spawnGloom();
+    this.updateGloom(dt, time);
+  }
+
+  private flood(time: number): void {
+    const v = this.valley;
+    this.floodMsgUntil = time + 5;
+    this.snd.thunder();
+    this.snd.splash(0);
+    for (const b of v.bridges.slice()) {
+      const lg = b.log;
+      this.particles.burst(lg.x, 0.03, lg.z, 0x66b8ff, 40, 0.22, 1.0, 0.9);
+      v.removeBridge(lg);
+      lg.x = -0.3 + v.logs.indexOf(lg) * 0.12;
+      lg.z = D / 2 - 0.04;
+      lg.y = 0.012;
+      lg.yaw = 0;
+      v.syncLog(lg);
+    }
+    for (const w of this.wisps) {
+      if (w.state !== 'live') continue;
+      const ri = v.riverAt(w.pos.x);
+      if (ri >= 0) {
+        const r = v.level.rivers[ri];
+        w.pos.x = r.x + (w.pos.x < r.x ? -1 : 1) * (r.w / 2 + 0.03);
+        w.glow = Math.max(0.05, w.glow - 0.2);
+        w.startle(time, r.x, w.pos.y);
+      }
+    }
+  }
+
+  private spawnGloom(): void {
+    const sprite = new Sprite(new SpriteMaterial({ map: gloomTexture(), transparent: true, depthWrite: false }));
+    sprite.scale.setScalar(0.06);
+    sprite.renderOrder = 4;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const g: Gloom = { sprite, x: side * (W / 2 - 0.03), z: (Math.random() - 0.5) * (D - 0.1), fleeUntil: 0, hitCool: 0, phase: Math.random() * 6 };
+    this.valley.group.add(sprite);
+    this.gloom.push(g);
+    this.particles.burst(g.x, 0.04, g.z, 0x9a4cff, 22, 0.1, 0.8, 0.5);
+    this.snd.thud(g.x / W);
+  }
+
+  /** Gloomlings chase the nearest wisp, drain its glow on contact, and fear glowcaps and quick pokes. */
+  private updateGloom(dt: number, time: number): void {
+    const v = this.valley;
+    const tips: { x: number; z: number; y: number; fast: boolean }[] = [];
+    for (const h of this.hands.active) {
+      const l = this.toLocal(h.tip, new Vector3());
+      tips.push({ x: l.x, z: l.z, y: l.y, fast: h.tipSpeed > 0.3 });
+    }
+    for (const g of this.gloom) {
+      g.phase += dt;
+      g.hitCool -= dt;
+      let tx = g.x;
+      let tz = g.z;
+      let best = 1e9;
+      let target: Wisp | null = null;
+      for (const w of this.wisps) {
+        if (w.state !== 'live' && w.state !== 'held') continue;
+        const d = Math.hypot(w.pos.x - g.x, w.pos.y - g.z);
+        if (d < best) {
+          best = d;
+          target = w;
+          tx = w.pos.x;
+          tz = w.pos.y;
+        }
+      }
+      let dx = tx - g.x;
+      let dz = tz - g.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      let speed = 0.036;
+      const fleeing = time < g.fleeUntil;
+      if (fleeing) speed = 0.13;
+      let vx = (dx / dl) * speed * (fleeing ? -1 : 1);
+      let vz = (dz / dl) * speed * (fleeing ? -1 : 1);
+      // glowcaps are safe light: gloomlings keep away
+      for (const c of v.caps) {
+        const cx = g.x - c.x;
+        const cz = g.z - c.z;
+        const cd = Math.hypot(cx, cz);
+        if (cd < 0.08 && cd > 1e-4) {
+          vx += (cx / cd) * 0.1 * (1 - cd / 0.08);
+          vz += (cz / cd) * 0.1 * (1 - cd / 0.08);
+        }
+      }
+      for (const tp of tips) {
+        const hx = g.x - tp.x;
+        const hz = g.z - tp.z;
+        const hd = Math.hypot(hx, hz);
+        if (hd < 0.04 && Math.abs(tp.y - 0.03) < 0.06 && tp.fast && time >= g.fleeUntil) {
+          g.fleeUntil = time + 3;
+          this.particles.burst(g.x, 0.04, g.z, 0xc27bff, 30, 0.16, 0.8, 0.8);
+          this.snd.pop(g.x / W);
+        } else if (hd < 0.05 && hd > 1e-4 && tp.y < 0.12) {
+          vx += (hx / hd) * 0.08;
+          vz += (hz / hd) * 0.08;
+        }
+      }
+      g.x = Math.max(-W / 2 + 0.02, Math.min(W / 2 - 0.02, g.x + vx * dt));
+      g.z = Math.max(-D / 2 + 0.02, Math.min(D / 2 - 0.02, g.z + vz * dt));
+      if (target && best < 0.03 && !fleeing) {
+        target.glow = Math.max(0, target.glow - 0.3 * dt);
+        if (g.hitCool <= 0) {
+          g.hitCool = 1;
+          target.startle(time, g.x, g.z);
+          this.particles.burst(target.pos.x, 0.04, target.pos.y, 0x9a4cff, 10, 0.1, 0.5, 0.4);
+        }
+      }
+      g.sprite.position.set(g.x, 0.032 + Math.sin(g.phase * 4) * 0.004, g.z);
+      g.sprite.scale.setScalar(0.055 + Math.sin(g.phase * 6) * 0.004);
+      (g.sprite.material as SpriteMaterial).opacity = fleeing ? 0.45 : 1;
     }
   }
 
@@ -797,6 +1025,7 @@ export class Game {
         have.obj.position.set(cx, have.r * 0.8, cz);
       } else if (this.sensed.size < 6) {
         this.sensed.set(mesh, v.addRock(cx, cz, r, false, true));
+        this.particles.burst(cx, 0.04, cz, 0xffffff, 30, 0.14, 0.9, 0.8);
         this.sensedCount++;
         this.snd.thud(cx / W);
         this.wisps.forEach((w) => { if (v.blocked(w.pos.x, w.pos.y)) this.unstick(w); });
@@ -889,6 +1118,7 @@ export class Game {
       m.setPinch(false, dt);
       this.demoStage = 'wait';
       this.demoT = 0;
+      this.demoRiver = 0;
       return;
     }
     this.demoT += dt;
@@ -896,8 +1126,8 @@ export class Game {
     let pinch = false;
     let umbrella = false;
     let speed = 0.2;
-    const log = v.logs[0];
-    const river = v.level.rivers[0];
+    const log = v.logs.find((l) => !l.bridge && l.heldBy < 0) ?? v.logs[0];
+    const river = v.level.rivers[Math.min(this.demoRiver, v.level.rivers.length - 1)];
     const goto = (x: number, y: number, z: number) => want.set(x, y, z);
     const near = (r: number) => this.demoPos.distanceTo(want) < r;
     const next = (st: string) => {
@@ -928,7 +1158,12 @@ export class Game {
         break;
       case 'drop':
         goto(river ? river.x : 0, 0.05, 0.02);
-        if (this.demoHold > 0.7) next('toStamp');
+        if (this.demoHold > 0.7) {
+          if (this.demoRiver + 1 < v.level.rivers.length) {
+            this.demoRiver++;
+            next('toLog');
+          } else next('toStamp');
+        }
         break;
       case 'toStamp':
         goto(0.15, 0.05, -0.12);
@@ -995,6 +1230,7 @@ export class Game {
           if (v.inBounds(l.x, l.z, 0.04) && l.y < 0.2 / (v.group.scale.x || 1) && v.riverAt(l.x, 0.03) < 0 && Math.hypot(l.x - s.hearth.x, l.z - s.hearth.z) > 0.08 && Math.hypot(l.x - s.nest.x, l.z - s.nest.z) > 0.07) {
             v.removeOldestStamp(5);
             v.addRock(l.x, l.z, 0.03, true);
+            this.particles.burst(l.x, 0.03, l.z, 0xaab0ff, 24, 0.12, 0.7, 0.5);
             this.snd.thud(l.x / W);
             this.wisps.forEach((w) => { if (v.blocked(w.pos.x, w.pos.y)) this.unstick(w); });
           }
@@ -1105,6 +1341,7 @@ export class Game {
       lg.y = 0.012;
       if (v.tryBridge(lg)) {
         this.bridgesEver++;
+        this.particles.burst(lg.x, 0.03, lg.z, 0x7fe8ff, 34, 0.16, 0.9, 0.7);
         this.snd.chime(7, 0.2, lg.x / W);
         setTimeout(() => this.snd.chime(11, 0.18), 120);
       } else {
@@ -1324,7 +1561,7 @@ export class Game {
     if (this.phase === 'calibrate') return;
     const lvl = this.level;
     if (this.phase === 'home') {
-      this.hint = this.voiceStatus || (this.save.residents.length ? 'Poke a wisp · pinch the air to raise a mountain' : 'Press Begin with a finger');
+      this.hint = this.voiceStatus || (this.save.residents.length ? 'Poke a wisp · pinch the air to raise a mountain' : 'Pick a level and press it');
       if (this.save.settings.gaze) this.hint = 'Look at a button to select it';
       return;
     }
@@ -1336,6 +1573,9 @@ export class Game {
     const t = this.t - this.tutStart;
     if (this.raining) this.hint = this.shelteredOnce ? 'Keep them covered!' : 'Rain! Hold an open palm over your wisps';
     else if (this.warning) this.hint = 'Storm coming — get ready to cover them';
+    else if (this.t < this.floodMsgUntil) this.hint = 'FLOOD! Bridges swept away — lay them again';
+    else if (this.t < this.windUntil) this.hint = this.t < this.windFrom ? 'Wind rising — find cover!' : 'Wind! Hide behind a mountain or under your palm';
+    else if (lvl.night && this.gloom.length > 0) this.hint = 'Gloomlings! Poke them away — they fear glowcaps';
     else if (lvl.tutorial && this.bridgesEver === 0) this.hint = this.save.settings.gaze ? 'Look at the log to lay it across' : 'Pinch the glowing log, lay it over the river';
     else if (waiting && this.valley.bridges.length < lvl.rivers.length) this.hint = 'Wisps are waiting — bridge the river';
     else if (lvl.tutorial && t > 40 && this.raining === false && this.valley.rocks.length === 0 && this.hands.hasRealHands) this.hint = 'Tip: pinch the air over a real object for a mountain';

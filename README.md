@@ -12,6 +12,10 @@ Track: **Gaming**. Division: **New Experience**.
 - **Real objects become mountains:** objects Quest's scene understanding detects on your table are turned into mountains automatically (WebXR mesh detection). For anything it misses, pinch the air above the object to raise one by hand.
 - **Poke** a wisp to startle it. Wisps remember where they got wet.
 
+## Levels
+Seven levels (First Light, Rainfall, Two Rivers, Night Watch, Gale, Flood, Hollow Heart) plus a Daily Dusk. Night adds gloomlings, Gale adds wind, Flood sweeps bridges away.
+Link options: `?level=N` starts a level, `?demo=1` plays a scripted demo hand (for recordings), `?contrast=1` high contrast, `?mouse=1` mouse as a hand inside the emulator.
+
 ## Reason to come back
 Rescued wisps move into your persistent valley (lanterns light up, saplings grow in real time while you're away). A new Daily Dusk each day, with a streak.
 

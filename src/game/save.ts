@@ -17,6 +17,8 @@ export interface SaveData {
   stars: number;
   residents: Resident[];
   tutorialDone: boolean;
+  unlocked: number;
+  levelStars: number[];
   settings: Settings;
   lastSeen: number;
 }
@@ -37,6 +39,8 @@ function fresh(): SaveData {
     stars: 0,
     residents: [],
     tutorialDone: false,
+    unlocked: 1,
+    levelStars: [0, 0, 0, 0, 0, 0, 0],
     settings: { gaze: false, voice: false, contrast: false },
     lastSeen: Date.now(),
   };

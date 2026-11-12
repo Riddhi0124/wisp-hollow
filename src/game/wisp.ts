@@ -291,6 +291,10 @@ export class Wisp {
     mat.opacity = faint ? 0.6 : 1;
   }
 
+  get hex(): number {
+    return this.color.getHex();
+  }
+
   setContrast(on: boolean): void {
     this.color.setHSL(this.hue, on ? 1 : 0.85, on ? 0.55 : 0.62);
     (this.body.material as SpriteMaterial).color.copy(this.color);

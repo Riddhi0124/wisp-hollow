@@ -96,6 +96,8 @@ export class HandTracker {
   gazeDir = new Vector3(0, 0, -1);
   /** When true, something else (the scripted demo) drives mouseHand. */
   external = false;
+  /** ?mouse=1: let the mouse act as a hand even inside an XR session (emulator play / recording). */
+  mouseInXR = false;
   xrActive = false;
   hasRealHands = false;
   tableY = 0.75;
@@ -112,16 +114,20 @@ export class HandTracker {
     private camera: PerspectiveCamera,
     private player: Object3D,
   ) {
-    const el = renderer.domElement;
-    el.addEventListener('pointermove', (e) => {
-      const r = el.getBoundingClientRect();
+    // Listen on the window: in emulators the visible canvas may not be the renderer's own canvas.
+    const view = () => {
+      if (this.renderer.xr.isPresenting) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      return renderer.domElement.getBoundingClientRect();
+    };
+    window.addEventListener('pointermove', (e) => {
+      const r = view();
       this.mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
       this.mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
       this.mouse.moved = true;
     });
-    el.addEventListener('pointerdown', () => (this.mouse.down = true));
+    window.addEventListener('pointerdown', () => (this.mouse.down = true));
     window.addEventListener('pointerup', () => (this.mouse.down = false));
-    el.addEventListener(
+    window.addEventListener(
       'wheel',
       (e) => {
         this.mouse.h = Math.max(0.01, Math.min(0.3, this.mouse.h - e.deltaY * 0.0002));
@@ -192,7 +198,7 @@ export class HandTracker {
     const m = this.mouseHand;
     if (this.external) {
       // a scripted demo hand owns mouseHand
-    } else if (!session) {
+    } else if (!session || this.mouseInXR) {
       m.kind = 'mouse';
       this.ndc.set(this.mouse.x, this.mouse.y);
       this.ray.setFromCamera(this.ndc, this.camera);

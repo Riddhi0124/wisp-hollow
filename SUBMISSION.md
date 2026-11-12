@@ -9,6 +9,8 @@
 
 **What it is.** Wisp Hollow is a mixed-reality tabletop game. Rest your palm on your table and a glowing valley blooms on it. Tiny wisps hatch at one end and want to reach the hearth at the other. They are autonomous agents, so you never steer them. You shape their world: pinch a log and lay it over the river, then hold an open palm over them when rain rolls in. The wisps run to your hand for cover. Objects Quest's scene understanding detects on your table (laptops, plants, boxes) become mountains automatically, and for anything it misses, a quick pinch above the object raises one there. Your real clutter reshapes the map.
 
+**Seven levels, each with a new idea.** First Light (bridges), Rainfall (palm shelter), Two Rivers, Night Watch (gloomlings that you poke away and that fear glowcaps), Gale (wind: hide behind mountains), Flood (the river sweeps bridges away) and Hollow Heart (everything at once), plus a Daily Dusk. Wisp trails, hearth sparks and drifting fireflies make the valley glow.
+
 **Why it fits the criteria.**
 - *Hands-first, seated, short:* the whole game (menus included) works with hands only, inside a 2-foot reach, and a Dusk takes about 3 minutes.
 - *Purposeful passthrough:* the valley is anchored to your detected table (WebXR plane detection), calibrated by your palm, and reshaped by objects found with mesh detection, with no room scan needed, so it works in any room. Detected real objects (WebXR mesh detection) become terrain.
