@@ -1,0 +1,41 @@
+{
+  "mcp": {
+    "iwsdk-runtime": {
+      "type": "local",
+      "command": [
+        "node",
+        "/Users/riddhipatel/Library/Application Support/Claude/scratch-workspaces/c66859ec-e44e-4b3b-b6bc-7bf04ca05c4a/29f8b41e-92c3-48c2-b9a9-6eb858d56005/scratch-2026-11-12-358129/wisp-hollow/node_modules/@iwsdk/cli/dist/cli.js",
+        "mcp",
+        "stdio"
+      ],
+      "enabled": true
+    },
+    "iwsdk-reference": {
+      "type": "local",
+      "command": [
+        "node",
+        "/Users/riddhipatel/Library/Application Support/Claude/scratch-workspaces/c66859ec-e44e-4b3b-b6bc-7bf04ca05c4a/29f8b41e-92c3-48c2-b9a9-6eb858d56005/scratch-2026-11-12-358129/wisp-hollow/node_modules/@iwsdk/reference/dist/cli.js"
+      ],
+      "enabled": true
+    },
+    "metavr": {
+      "type": "local",
+      "command": [
+        "node",
+        "/Users/riddhipatel/Library/Application Support/Claude/scratch-workspaces/c66859ec-e44e-4b3b-b6bc-7bf04ca05c4a/29f8b41e-92c3-48c2-b9a9-6eb858d56005/scratch-2026-11-12-358129/wisp-hollow/node_modules/@meta-quest/metavr/bin.js",
+        "mcp",
+        "server"
+      ],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "iwsdk-runtime_*": "allow",
+    "iwsdk-reference_*": "allow",
+    "metavr_*": "allow",
+    "skill": {
+      "iwsdk-*": "allow"
+    }
+  },
+  "$schema": "https://opencode.ai/config.json"
+}
