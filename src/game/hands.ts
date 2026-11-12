@@ -108,7 +108,7 @@ export class HandTracker {
   private ray = new Raycaster();
   private ndc = new Vector2();
   private plane = new Plane(new Vector3(0, 1, 0), 0);
-  private mouse = { x: 0, y: 0, down: false, umbrella: false, h: 0.045, moved: false };
+  private mouse = { x: 0, y: 0, down: false, latched: false, umbrella: false, h: 0.018, moved: false };
   private fwd = new Vector3();
 
   constructor(
@@ -121,14 +121,18 @@ export class HandTracker {
       if (this.renderer.xr.isPresenting) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
       return renderer.domElement.getBoundingClientRect();
     };
-    window.addEventListener('pointermove', (e) => {
+    // Capture phase + mouse*/pointer* duplicates, so an emulator overlay can't swallow the events.
+    const onMove = (e: MouseEvent) => {
       const r = view();
       this.mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
       this.mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
       this.mouse.moved = true;
-    });
-    window.addEventListener('pointerdown', () => (this.mouse.down = true));
-    window.addEventListener('pointerup', () => (this.mouse.down = false));
+    };
+    const onDown = () => (this.mouse.down = true);
+    const onUp = () => (this.mouse.down = false);
+    for (const t of ['pointermove', 'mousemove']) window.addEventListener(t, onMove as EventListener, true);
+    for (const t of ['pointerdown', 'mousedown']) window.addEventListener(t, onDown, true);
+    for (const t of ['pointerup', 'mouseup']) window.addEventListener(t, onUp, true);
     window.addEventListener(
       'wheel',
       (e) => {
@@ -138,6 +142,10 @@ export class HandTracker {
       { passive: false },
     );
     window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !e.repeat) {
+        this.mouse.latched = !this.mouse.latched; // Space = grab / drop without holding the button
+        e.preventDefault();
+      }
       if (e.key === 's' || e.key === 'S') this.mouse.umbrella = true;
     });
     window.addEventListener('keyup', (e) => {
@@ -148,6 +156,7 @@ export class HandTracker {
   /** Lets UI clicks swallow the mouse press so it doesn't also act as a pinch. */
   cancelMouse(): void {
     this.mouse.down = false;
+    this.mouse.latched = false;
   }
 
   /** Every hand that is currently usable as input. */
@@ -217,7 +226,7 @@ export class HandTracker {
         m.pinchPoint.copy(hit);
         m.palmNormal.set(0, this.mouse.umbrella ? -1 : 0.2, 0).normalize();
         m.spread = this.mouse.umbrella ? 0 : 0.2;
-        m.setPinch(this.mouse.down && !this.mouse.umbrella, dt);
+        m.setPinch((this.mouse.down || this.mouse.latched) && !this.mouse.umbrella, dt);
         m.motion(dt);
         m.flatTime = this.mouse.umbrella ? m.flatTime + dt : 0;
       } else {

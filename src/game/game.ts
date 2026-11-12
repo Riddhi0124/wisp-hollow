@@ -259,7 +259,7 @@ export class Game {
           this.press(b);
         }
       }
-    });
+    }, true);
   }
 
   private applySettings(): void {
@@ -1272,7 +1272,8 @@ export class Game {
     const v = this.valley;
     const l = this.toLocal(h.pinchPoint, new Vector3());
     let best: Wisp | Log | null = null;
-    let bd = h.isController ? 0.085 : 0.055;
+    const wide = h.isController || h.kind === 'mouse'; // clicking is less precise than pinching
+    let bd = wide ? 0.085 : 0.055;
     for (const w of this.wisps) {
       if (w.state !== 'live' && w.state !== 'faint') continue;
       if (w.state === 'faint') continue;
@@ -1283,7 +1284,7 @@ export class Game {
       for (const lg of v.logs) {
         if (lg.heldBy >= 0) continue;
         const d = v.logDistance(lg, l.x, l.z) + Math.abs(l.y - lg.y) * 0.3;
-        if (d < Math.min(bd, h.isController ? 0.07 : 0.045)) { bd = d; best = lg; }
+        if (d < Math.min(bd, wide ? 0.07 : 0.045)) { bd = d; best = lg; }
       }
     }
     if (best) {
@@ -1597,7 +1598,7 @@ export class Game {
     else if (this.t < this.floodMsgUntil) this.hint = 'FLOOD! Bridges swept away — lay them again';
     else if (this.t < this.windUntil) this.hint = this.t < this.windFrom ? 'Wind rising — find cover!' : 'Wind! Hide behind a mountain or under your palm';
     else if (lvl.night && this.gloom.length > 0) this.hint = 'Gloomlings! Poke them away — they fear glowcaps';
-    else if (lvl.tutorial && this.bridgesEver === 0) this.hint = this.save.settings.gaze ? 'Look at the log to lay it across' : 'Pinch the glowing log, lay it over the river';
+    else if (lvl.tutorial && this.bridgesEver === 0) this.hint = this.save.settings.gaze ? 'Look at the log to lay it across' : this.hands.mouseHand.present ? 'Hold the mouse on the log and drag it over the river (or press Space)' : 'Pinch the glowing log, lay it over the river';
     else if (waiting && this.valley.bridges.length < lvl.rivers.length) this.hint = 'Wisps are waiting — bridge the river';
     else if (lvl.tutorial && t > 40 && this.raining === false && this.valley.rocks.length === 0 && this.hands.hasRealHands) this.hint = 'Tip: pinch the air over a real object for a mountain';
     else if (this.voiceStatus) this.hint = this.voiceStatus;
