@@ -255,21 +255,27 @@ export class Valley {
     return g;
   }
 
-  addRock(x: number, z: number, r: number, stamped: boolean): Rock {
+  addRock(x: number, z: number, r: number, stamped: boolean, ring = stamped): Rock {
     const obj = this.edged(new IcosahedronGeometry(r, 0), this.m.rock, this.m.rockEdge);
     obj.scale.y = 1.15;
     obj.position.set(x, r * 0.8, z);
     obj.rotation.y = x * 31;
     this.content.add(obj);
-    if (stamped) {
-      const ring = makeGlow(0xffffff, r * 4.2, 0.6);
-      ring.position.set(x, r * 0.8, z);
-      this.content.add(ring);
-      setTimeout(() => ring.parent?.remove(ring), 450);
+    if (ring) {
+      const fx = makeGlow(0xffffff, r * 4.2, 0.6);
+      fx.position.set(x, r * 0.8, z);
+      this.content.add(fx);
+      setTimeout(() => fx.parent?.remove(fx), 450);
     }
     const rock = { x, z, r, obj, stamped };
     this.rocks.push(rock);
     return rock;
+  }
+
+  removeRock(rock: Rock): void {
+    this.content.remove(rock.obj);
+    const i = this.rocks.indexOf(rock);
+    if (i >= 0) this.rocks.splice(i, 1);
   }
 
   removeOldestStamp(max: number): void {

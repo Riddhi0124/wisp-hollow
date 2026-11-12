@@ -64,6 +64,9 @@ export class Game {
   private ghost: LineLoop;
   private calibProg = 0;
   private planeScan = 0;
+  private meshScan = 0;
+  private sensed = new Map<object, import('./valley.js').Rock>();
+  sensedCount = 0;
 
   // ui
   private main = new Panel(0.36, 0.23);
@@ -275,6 +278,7 @@ export class Game {
   // ---------- phases ------------------------------------------------------
 
   private clearWisps(): void {
+    this.sensed.clear();
     this.wisps.forEach((w) => this.valley.group.remove(w.group));
     this.wisps = [];
     this.hands.hands.forEach((h) => (h.grabbed = null));
@@ -560,6 +564,8 @@ export class Game {
     // shelter zones from hands + temp zones
     this.updateZones(time);
 
+    this.scanMeshes();
+
     // interaction
     this.updateGrabs(dt);
     this.updatePanels(dt);
@@ -690,6 +696,71 @@ export class Game {
         a.setY(i, y);
       }
       a.needsUpdate = true;
+    }
+  }
+
+
+  /**
+   * Scene understanding: labelled objects Quest has detected (laptops, lamps, plants, storage...)
+   * that sit on the table inside the valley become mountains, so your real clutter reshapes the map.
+   * Falls back gracefully (and the manual pinch-stamp still works) when no meshes are available.
+   */
+  private scanMeshes(): void {
+    if (!this.renderer.xr.isPresenting || this.t - this.meshScan < 1.5) return;
+    this.meshScan = this.t;
+    const xr = this.renderer.xr;
+    const frame = xr.getFrame() as any;
+    const ref = xr.getReferenceSpace();
+    const meshes = frame?.detectedMeshes;
+    if (!meshes || !ref) return;
+    const v = this.valley;
+    const skip = /table|floor|wall|ceiling|global|door|window/i;
+    const seen = new Set<object>();
+    const m = new Matrix4();
+    const p = new Vector3();
+    for (const mesh of meshes as Iterable<any>) {
+      const label = String(mesh.semanticLabel ?? '');
+      if (skip.test(label) || !mesh.vertices || mesh.vertices.length < 9) continue;
+      const pose = frame.getPose(mesh.meshSpace, ref);
+      if (!pose) continue;
+      m.fromArray(pose.transform.matrix);
+      let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, y0 = 1e9, y1 = -1e9;
+      const verts = mesh.vertices as Float32Array;
+      const stride = Math.max(3, Math.floor(verts.length / 3 / 64) * 3);
+      for (let i = 0; i + 2 < verts.length; i += stride) {
+        p.set(verts[i], verts[i + 1], verts[i + 2]).applyMatrix4(m);
+        this.player.localToWorld(p);
+        this.toLocal(p, p);
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+        z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z);
+        y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+      }
+      const cx = (x0 + x1) / 2;
+      const cz = (z0 + z1) / 2;
+      const r = Math.max(0.02, Math.min(0.07, Math.max(x1 - x0, z1 - z0) / 2));
+      // must rest on the table (not hover or be a wall-sized thing) and sit inside the valley
+      const onTable = y0 > -0.05 && y0 < 0.08 && y1 - y0 > 0.015 && y1 - y0 < 0.5 && x1 - x0 < 0.35 && z1 - z0 < 0.35;
+      if (!onTable || !v.inBounds(cx, cz, 0.03)) continue;
+      const lv = v.level;
+      if (v.riverAt(cx, 0.03) >= 0 || Math.hypot(cx - lv.hearth.x, cz - lv.hearth.z) < 0.08 || Math.hypot(cx - lv.nest.x, cz - lv.nest.z) < 0.07) continue;
+      seen.add(mesh);
+      const have = this.sensed.get(mesh);
+      if (have) {
+        have.x = cx;
+        have.z = cz;
+        have.obj.position.set(cx, have.r * 0.8, cz);
+      } else if (this.sensed.size < 6) {
+        this.sensed.set(mesh, v.addRock(cx, cz, r, false, true));
+        this.sensedCount++;
+        this.snd.thud(cx / W);
+        this.wisps.forEach((w) => { if (v.blocked(w.pos.x, w.pos.y)) this.unstick(w); });
+      }
+    }
+    for (const [k, rock] of this.sensed) {
+      if (!seen.has(k)) {
+        v.removeRock(rock);
+        this.sensed.delete(k);
+      }
     }
   }
 

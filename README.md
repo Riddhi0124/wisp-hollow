@@ -9,7 +9,7 @@ Track: **Gaming**. Division: **New Experience**.
 - **Rest your palm on your table**: the valley blooms on your real surface (plane detection finds it first; your palm sets the exact height, so it works in any room).
 - **Pinch a log and lay it over the river**: wisps are autonomous agents (utility AI); they route over the bridges you build.
 - **Hold an open palm over them when it rains**: wisps run to your hand for cover. Two hands make a bigger dome.
-- **Pinch the air above a real object** (a mug, your phone) to raise a mountain: your actual clutter reshapes the map.
+- **Real objects become mountains:** objects Quest's scene understanding detects on your table are turned into mountains automatically (WebXR mesh detection). For anything it misses, pinch the air above the object to raise one by hand.
 - **Poke** a wisp to startle it. Wisps remember where they got wet.
 
 ## Reason to come back
