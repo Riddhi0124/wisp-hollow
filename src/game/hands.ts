@@ -94,6 +94,8 @@ export class HandTracker {
   mouseHand = new Hand(2);
   gazeOrigin = new Vector3();
   gazeDir = new Vector3(0, 0, -1);
+  /** When true, something else (the scripted demo) drives mouseHand. */
+  external = false;
   xrActive = false;
   hasRealHands = false;
   tableY = 0.75;
@@ -188,7 +190,9 @@ export class HandTracker {
 
     // Desktop mouse stands in for a hand outside of XR.
     const m = this.mouseHand;
-    if (!session) {
+    if (this.external) {
+      // a scripted demo hand owns mouseHand
+    } else if (!session) {
       m.kind = 'mouse';
       this.ndc.set(this.mouse.x, this.mouse.y);
       this.ray.setFromCamera(this.ndc, this.camera);

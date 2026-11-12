@@ -80,6 +80,14 @@ export class Game {
   private armed = new Map<Hand, boolean>();
   private rayHit = new Set<Hand>();
   private autoStart = false;
+  private autoParam = false;
+  private demo = false;
+  private demoStage = 'wait';
+  private demoT = 0;
+  private demoPos = new Vector3(0.1, 0.2, 0.3);
+  private demoPinch = false;
+  private demoUmbrella = false;
+  private demoHold = 0;
   private cursors: Sprite[] = [];
   private reticle: Sprite;
   private guide: Sprite;
@@ -185,7 +193,12 @@ export class Game {
     this.hudPos.set(0, 1.2, -0.5);
 
     try {
-      this.autoStart = new URLSearchParams(location.search).get('auto') === '1';
+      const q = new URLSearchParams(location.search);
+      this.demo = q.get('demo') === '1';
+      this.autoParam = q.get('auto') === '1' || this.demo;
+      this.autoStart = this.autoParam;
+      this.hands.external = this.demo;
+      if (q.get('contrast') === '1') this.save.settings.contrast = true; // link option for the accessibility shot (not saved)
     } catch {
       /* no URL access */
     }
@@ -193,6 +206,8 @@ export class Game {
     this.setupInput();
     renderer.xr.addEventListener('sessionstart', () => {
       this.snd.ensure();
+      this.autoStart = this.autoParam; // entering XR re-arms ?auto / ?demo
+      this.demoStage = 'wait';
       this.toCalibrate();
     });
     renderer.xr.addEventListener('sessionend', () => this.autoPlaceDesktop());
@@ -320,6 +335,7 @@ export class Game {
     const diff = Math.min(3, Math.floor(this.save.dusks / 2));
     const seed = daily ? hashSeed(dayKey()) : (Math.random() * 1e9) | 0;
     this.level = makeLevel(seed, diff, tutorial);
+    if (this.demo) this.level.storms = [8]; // demo: rain hits while the wisps are crossing
     this.clearWisps();
     this.valley.load(this.level, 0, 0);
     const lv = this.level;
@@ -463,6 +479,7 @@ export class Game {
     const dt = Math.min(0.05, dtRaw);
     this.t = time;
     this.hands.update(dt);
+    if (this.demo) this.runDemo(dt);
     this.valley.update(dt, time);
     const xr = this.renderer.xr.isPresenting;
 
@@ -855,6 +872,110 @@ export class Game {
     return v.level.rivers.every((r, i) => (x0 < r.x) === (x1 < r.x) || v.bridges.some((b) => b.river === i));
   }
 
+
+  // ---------- scripted demo (?demo=1) ------------------------------------
+
+  /**
+   * A scripted virtual hand that plays one round through the real input pipeline
+   * (pinch, carry, release, quick-pinch mountain, open-palm shelter). For screen
+   * recordings; the HUD says DEMO so it is never mistaken for live play.
+   */
+  private runDemo(dt: number): void {
+    const m = this.hands.mouseHand;
+    const v = this.valley;
+    m.kind = 'mouse';
+    if (this.phase !== 'dusk') {
+      m.present = false;
+      m.setPinch(false, dt);
+      this.demoStage = 'wait';
+      this.demoT = 0;
+      return;
+    }
+    this.demoT += dt;
+    const want = new Vector3(0.12, 0.22, 0.3);
+    let pinch = false;
+    let umbrella = false;
+    let speed = 0.2;
+    const log = v.logs[0];
+    const river = v.level.rivers[0];
+    const goto = (x: number, y: number, z: number) => want.set(x, y, z);
+    const near = (r: number) => this.demoPos.distanceTo(want) < r;
+    const next = (st: string) => {
+      this.demoStage = st;
+      this.demoHold = 0;
+      ((window as any).__demoLog ??= []).push(`t${this.duskT.toFixed(1)} ${st} home${this.homeCount} bridges${this.valley.bridges.length} stamps${this.valley.rocks.filter((r) => r.stamped).length} rain${this.raining} zones${this.zones.length} glow${this.wisps.map((w) => w.glow.toFixed(1)).join('/')}`);
+    };
+    this.demoHold += dt;
+
+    switch (this.demoStage) {
+      case 'wait':
+        if (this.demoT > 2.5) next('toLog');
+        break;
+      case 'toLog':
+        if (log) goto(log.x, 0.03, log.z);
+        if ((log && near(0.012)) || this.demoHold > 4) next('grab');
+        break;
+      case 'grab':
+        if (log) goto(log.x, 0.03, log.z);
+        pinch = true;
+        if (this.demoHold > 0.5) next('carry');
+        break;
+      case 'carry':
+        pinch = true;
+        speed = 0.16;
+        goto(river ? river.x : 0, 0.05, 0.02);
+        if (near(0.012) || this.demoHold > 6) next('drop');
+        break;
+      case 'drop':
+        goto(river ? river.x : 0, 0.05, 0.02);
+        if (this.demoHold > 0.7) next('toStamp');
+        break;
+      case 'toStamp':
+        goto(0.15, 0.05, -0.12);
+        if (this.demoHold > 6 || near(0.012)) next('stamp');
+        break;
+      case 'stamp':
+        goto(0.15, 0.05, -0.12);
+        pinch = this.demoHold > 0.3 && this.demoHold < 0.5;
+        if (this.demoHold > 1.2) next('idle');
+        break;
+      case 'idle':
+        goto(0.1, 0.24, 0.3);
+        if (this.warning || this.raining) next('shelter');
+        break;
+      case 'shelter': {
+        umbrella = true;
+        speed = 0.35;
+        const live = this.wisps.filter((w) => w.state === 'live');
+        if (live.length) {
+          const cx = live.reduce((a, w) => a + w.pos.x, 0) / live.length;
+          const cz = live.reduce((a, w) => a + w.pos.y, 0) / live.length;
+          goto(cx, 0.1, cz);
+        }
+        if (!this.raining && !this.warning && this.demoHold > 1) next('after');
+        break;
+      }
+      default:
+        goto(0.1, 0.24, 0.3);
+    }
+
+    // smooth motion
+    const d = want.clone().sub(this.demoPos);
+    const step = Math.min(d.length(), speed * dt * 1.2 + d.length() * dt * 2.5);
+    if (d.length() > 1e-5) this.demoPos.addScaledVector(d.normalize(), step);
+    const world = v.group.localToWorld(this.demoPos.clone());
+    m.present = true;
+    m.tip.copy(world);
+    m.thumb.copy(world);
+    m.palm.copy(world);
+    m.wrist.copy(world);
+    m.pinchPoint.copy(world);
+    m.palmNormal.set(0, umbrella ? -1 : 0.3, 0).normalize();
+    m.spread = umbrella ? 0.01 : 0.2;
+    m.setPinch(pinch, dt);
+    m.motion(dt);
+  }
+
   // ---------- grabbing ----------------------------------------------------
 
   private updateGrabs(dt: number): void {
@@ -1193,6 +1314,7 @@ export class Game {
     this.hud.group.position.copy(this.hudPos);
     this.hud.group.lookAt(cam.x, cam.y - 0.05, cam.z);
     this.updateHint();
+    if (this.demo && this.phase === 'dusk') this.hint = 'DEMO · ' + this.hint;
     this.hud.group.visible = this.hint !== '' || this.phase === 'dusk';
     this.hud.group.scale.setScalar(this.phase === 'calibrate' ? 1.8 : 1);
     this.drawHud();
