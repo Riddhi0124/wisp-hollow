@@ -63,6 +63,7 @@ export class Game {
   private tableY = 0.75;
   private ghost: LineLoop;
   private calibProg = 0;
+  private calibWait = 0;
   private planeScan = 0;
   private meshScan = 0;
   private sensed = new Map<object, import('./valley.js').Rock>();
@@ -242,6 +243,7 @@ export class Game {
     this.valley.group.visible = false;
     this.main.group.visible = false;
     this.calibProg = 0;
+    this.calibWait = 0;
     this.placedK = 0;
     this.clearWisps();
     this.ghost.visible = true;
@@ -469,14 +471,24 @@ export class Game {
       this.est.pos.set(head.x + fwd.x * 0.55, head.y - 0.5, head.z + fwd.z * 0.55);
       this.est.yaw = Math.atan2(head.x - this.est.pos.x, head.z - this.est.pos.z);
     }
+    this.calibWait += dt;
     let flat: Hand | null = null;
     for (const hd of h.active) {
       const down = hd.palmNormal.y < -0.78 || hd.palmNormal.y > 0.78;
-      if (hd.spread < 0.04 && down && hd.speed < 0.06 && hd.palm.y < head.y - 0.2 && hd.palm.y > 0.15) flat = hd;
+      const lowAndStill = hd.speed < 0.06 && hd.palm.y < head.y - 0.2 && hd.palm.y > 0.15;
+      // a flat palm anywhere low, or ANY steady hand touching the detected table surface
+      const onPlane = this.est.havePlane && Math.abs(hd.palm.y - this.est.pos.y) < 0.1;
+      if (lowAndStill && ((hd.spread < 0.04 && down) || onPlane)) flat = hd;
     }
     if (flat) this.calibProg = Math.min(1, this.calibProg + dt / 0.9);
     else this.calibProg = Math.max(0, this.calibProg - dt * 2);
-    this.hint = flat ? 'Hold still…' : this.est.havePlane ? 'Table found — rest your palm on it' : 'Rest your palm flat on your table (or hold grip on it)';
+    // No palm needed if the table is detected: after a few seconds it just places itself.
+    const autoLeft = this.est.havePlane ? Math.ceil(5 - this.calibWait) : Math.ceil(12 - this.calibWait);
+    this.hint = flat
+      ? 'Hold still…'
+      : this.est.havePlane
+        ? `Table found — rest a hand on it (or wait ${Math.max(0, autoLeft)})`
+        : `Rest your palm flat on your table (or wait ${Math.max(0, autoLeft)})`;
     this.ghost.position.set(this.est.pos.x, flat ? flat.palm.y - 0.012 : this.est.pos.y, this.est.pos.z);
     this.ghost.rotation.y = this.est.yaw;
     this.ghost.scale.setScalar(this.est.scale);
@@ -491,6 +503,11 @@ export class Game {
         this.est.yaw = Math.atan2(head.x - this.est.pos.x, head.z - this.est.pos.z);
       }
       this.est.pos.y = this.tableY;
+      this.place();
+    } else if ((this.est.havePlane && this.calibWait > 5) || this.calibWait > 12) {
+      // hands-free placement: on the detected table, or in front of you as a last resort
+      this.tableY = this.est.pos.y;
+      this.hands.tableY = this.tableY;
       this.place();
     }
   }
@@ -1148,6 +1165,7 @@ export class Game {
     this.hud.group.lookAt(cam.x, cam.y - 0.05, cam.z);
     this.updateHint();
     this.hud.group.visible = this.hint !== '' || this.phase === 'dusk';
+    this.hud.group.scale.setScalar(this.phase === 'calibrate' ? 1.8 : 1);
     this.drawHud();
   }
 
